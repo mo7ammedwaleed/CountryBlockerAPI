@@ -9,5 +9,8 @@ namespace CountryBlockerAPI.Services
         PagedResponseDto<BlockedCountryResponseDto> GetAllBlocked(int page, int pageSize, string? search);
 
         Task<(bool Success, string Error, int StatusCode)> AddTemporalBlockAsync(string countryCode, int durationMinutes);
+
+        TemporalBlockResponseDto? GetTemporalBlockInfo(string countryCode);
+        IEnumerable<TemporalBlockResponseDto> GetAllActiveTemporalBlocks();
     }
 }

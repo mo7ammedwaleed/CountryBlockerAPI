@@ -1,8 +1,8 @@
-﻿using CountryBlockerAPI.Repository;
-using CountryBlockerAPI.Services;
-using Microsoft.AspNetCore.Mvc;
+﻿using System.Net;
 using CountryBlockerAPI.DTOs.Request_DTOs;
 using CountryBlockerAPI.DTOs.Response_DTOs;
+using CountryBlockerAPI.Services;
+using Microsoft.AspNetCore.Mvc;
 
 namespace CountryBlockerAPI.Controllers
 {
@@ -12,14 +12,14 @@ namespace CountryBlockerAPI.Controllers
     public class CountriesController : ControllerBase
     {
         private readonly ICountryService _countryService;
-        private readonly ICountryRepository _repo;
+        private readonly ILogger<CountriesController> _logger;
 
-        public CountriesController(ICountryService countryService, ICountryRepository repo)
+        public CountriesController(ICountryService countryService, ILogger<CountriesController> logger)
         {
             _countryService = countryService;
-            _repo = repo;
-        }
+            _logger = logger;
 
+        }
 
         [HttpPost("block")]
         [ProducesResponseType(StatusCodes.Status200OK)]
@@ -29,11 +29,11 @@ namespace CountryBlockerAPI.Controllers
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
+
             var (success, error) = await _countryService.BlockCountryAsync(request.CountryCode);
 
             if (!success)
             {
-                // Duplicate → 409, invalid code → 400
                 if (error.Contains("already blocked"))
                     return Conflict(new { message = error });
                 return BadRequest(new { message = error });
@@ -42,7 +42,6 @@ namespace CountryBlockerAPI.Controllers
             return Ok(new { message = $"Country '{request.CountryCode.ToUpper()}' has been blocked." });
         }
 
-        
         [HttpDelete("block/{countryCode}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -55,7 +54,6 @@ namespace CountryBlockerAPI.Controllers
 
             return Ok(new { message = $"Country '{countryCode.ToUpper()}' has been unblocked." });
         }
-
 
         [HttpGet("blocked")]
         [ProducesResponseType(typeof(PagedResponseDto<BlockedCountryResponseDto>), StatusCodes.Status200OK)]
@@ -72,9 +70,8 @@ namespace CountryBlockerAPI.Controllers
             return Ok(result);
         }
 
-
         [HttpPost("temporal-block")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(TemporalBlockResponseDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> TemporalBlock([FromBody] TemporalBlockRequestDto request)
@@ -93,34 +90,16 @@ namespace CountryBlockerAPI.Controllers
                 };
             }
 
-            var block = _repo.GetTemporalBlock(request.CountryCode);
-
-            return Ok(new TemporalBlockResponseDto
-            {
-                CountryCode = block!.CountryCode,
-                CountryName = block.CountryName,
-                ExpiresAt = block.ExpiresAt,
-                DurationMinutes = block.DurationMinutes,
-                MinutesRemaining = (int)(block.ExpiresAt - DateTime.UtcNow).TotalMinutes
-            });
+            var block = _countryService.GetTemporalBlockInfo(request.CountryCode);
+            return Ok(block);
         }
+
 
         [HttpGet("temporal-blocks")]
         [ProducesResponseType(typeof(IEnumerable<TemporalBlockResponseDto>), StatusCodes.Status200OK)]
         public IActionResult GetTemporalBlocks()
         {
-            var blocks = _repo.GetAllTemporalBlocks()
-                .Where(b => b.ExpiresAt > DateTime.UtcNow)
-                .Select(b => new TemporalBlockResponseDto
-                {
-                    CountryCode = b.CountryCode,
-                    CountryName = b.CountryName,
-                    ExpiresAt = b.ExpiresAt,
-                    DurationMinutes = b.DurationMinutes,
-                    MinutesRemaining = (int)(b.ExpiresAt - DateTime.UtcNow).TotalMinutes
-                });
-
-            return Ok(blocks);
+            return Ok(_countryService.GetAllActiveTemporalBlocks());
         }
     }
 }

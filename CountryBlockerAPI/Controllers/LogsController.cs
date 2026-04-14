@@ -36,8 +36,7 @@ namespace CountryBlockerAPI.Controllers
                 logs = logs.Where(l => l.IsBlocked == blockedOnly.Value);
 
             if (!string.IsNullOrWhiteSpace(countryCode))
-                logs = logs.Where(l =>
-                    l.CountryCode.Equals(countryCode.Trim(), StringComparison.OrdinalIgnoreCase));
+                logs = logs.Where(x => x.CountryCode.ToLower() == countryCode.ToLower());
 
             // Most recent first
             var ordered = logs.OrderByDescending(l => l.Timestamp).ToList();

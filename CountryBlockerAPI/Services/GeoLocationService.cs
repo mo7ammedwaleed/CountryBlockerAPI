@@ -7,6 +7,7 @@ namespace CountryBlockerAPI.Services
     {
         private readonly HttpClient _httpClient;
         private readonly string _apiKey;
+        private readonly string baseUrl;
         private readonly ILogger<GeoLocationService> _logger;
 
         public GeoLocationService(
@@ -17,13 +18,14 @@ namespace CountryBlockerAPI.Services
             _httpClient = httpClient;
             _apiKey = configuration["GeoLocation:ApiKey"] ?? string.Empty;
             _logger = logger;
+            baseUrl = configuration["GeoLocation:BaseUrl"] ?? string.Empty;
         }
 
         public async Task<GeoLocationResult> LookupAsync(string ipAddress)
         {
-            var url = string.IsNullOrEmpty(_apiKey)
-                ? $"https://ipapi.co/{ipAddress}/json/"
-                : $"https://ipapi.co/{ipAddress}/json/?key={_apiKey}";
+            var url = new Uri(string.IsNullOrEmpty(_apiKey)
+                ? $"{baseUrl}"
+                : $"{baseUrl}?apikey={_apiKey}&ip={ipAddress}");
 
             _logger.LogInformation("GeoLocation lookup for IP: {Ip}", ipAddress);
 

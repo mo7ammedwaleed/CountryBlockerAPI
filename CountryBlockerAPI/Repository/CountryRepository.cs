@@ -3,7 +3,7 @@ using CountryBlockerAPI.Models;
 
 namespace CountryBlockerAPI.Repository
 {
-    public class CountryRepository
+    public class CountryRepository : ICountryRepository
     {
 
         private readonly ConcurrentDictionary<string, BlockedCountry> _blockedCountries = new();

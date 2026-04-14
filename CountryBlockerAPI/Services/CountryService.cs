@@ -1,84 +1,44 @@
 ﻿using CountryBlockerAPI.Models;
 using CountryBlockerAPI.Repository;
 using CountryBlockerAPI.DTOs.Response_DTOs;
+using CountryBlockerAPI.Utilities;
 
 namespace CountryBlockerAPI.Services
 {
     public class CountryService : ICountryService
     {
         private readonly ICountryRepository _repo;
-        private readonly IGeoLocationService _geoService;
         private readonly ILogger<CountryService> _logger;
 
-        
-        private static readonly HashSet<string> ValidCountryCodes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "AF","AX","AL","DZ","AS","AD","AO","AI","AQ","AG","AR","AM","AW","AU","AT",
-        "AZ","BS","BH","BD","BB","BY","BE","BZ","BJ","BM","BT","BO","BQ","BA","BW",
-        "BV","BR","IO","BN","BG","BF","BI","CV","KH","CM","CA","KY","CF","TD","CL",
-        "CN","CX","CC","CO","KM","CG","CD","CK","CR","CI","HR","CU","CW","CY","CZ",
-        "DK","DJ","DM","DO","EC","EG","SV","GQ","ER","EE","SZ","ET","FK","FO","FJ",
-        "FI","FR","GF","PF","TF","GA","GM","GE","DE","GH","GI","GR","GL","GD","GP",
-        "GU","GT","GG","GN","GW","GY","HT","HM","VA","HN","HK","HU","IS","IN","ID",
-        "IR","IQ","IE","IM","IL","IT","JM","JP","JE","JO","KZ","KE","KI","KP","KR",
-        "KW","KG","LA","LV","LB","LS","LR","LY","LI","LT","LU","MO","MG","MW","MY",
-        "MV","ML","MT","MH","MQ","MR","MU","YT","MX","FM","MD","MC","MN","ME","MS",
-        "MA","MZ","MM","NA","NR","NP","NL","NC","NZ","NI","NE","NG","NU","NF","MK",
-        "MP","NO","OM","PK","PW","PS","PA","PG","PY","PE","PH","PN","PL","PT","PR",
-        "QA","RE","RO","RU","RW","BL","SH","KN","LC","MF","PM","VC","WS","SM","ST",
-        "SA","SN","RS","SC","SL","SG","SX","SK","SI","SB","SO","ZA","GS","SS","ES",
-        "LK","SD","SR","SJ","SE","CH","SY","TW","TJ","TZ","TH","TL","TG","TK","TO",
-        "TT","TN","TR","TM","TC","TV","UG","UA","AE","GB","US","UM","UY","UZ","VU",
-        "VE","VN","VG","VI","WF","EH","YE","ZM","ZW"
-    };
-
-        public CountryService(
-            ICountryRepository repo,
-            IGeoLocationService geoService,
-            ILogger<CountryService> logger)
+        public CountryService(ICountryRepository repo, ILogger<CountryService> logger)
         {
             _repo = repo;
-            _geoService = geoService;
             _logger = logger;
         }
 
-
-        public async Task<(bool Success, string Error)> BlockCountryAsync(string countryCode)
+        public Task<(bool Success, string Error)> BlockCountryAsync(string countryCode)
         {
             var code = countryCode.ToUpperInvariant();
 
-            if (!ValidCountryCodes.Contains(code))
-                return (false, $"'{code}' is not a valid ISO 3166-1 alpha-2 country code.");
+            if (!Constants.ValidCountryCodes.Contains(code))
+                return Task.FromResult((false, $"'{code}' is not a valid ISO 3166-1 alpha-2 country code."));
 
             if (_repo.ExistsBlockedCountry(code))
-                return (false, $"Country '{code}' is already blocked.");
-
-            
-            string countryName = code; 
-            try
-            {
-                
-                var result = await _geoService.LookupAsync("8.8.8.8"); 
-                                                                      
-                countryName = GetCountryName(code);
-            }
-            catch (GeoLocationException ex)
-            {
-                _logger.LogWarning(ex, "Could not resolve country name for {Code}, using code as name.", code);
-                countryName = code;
-            }
+                return Task.FromResult((false, $"Country '{code}' is already blocked."));
 
             var country = new BlockedCountry
             {
                 CountryCode = code,
-                CountryName = countryName,
+                CountryName = GetCountryName(code),
                 BlockedAt = DateTime.UtcNow
             };
 
             var added = _repo.AddBlockedCountry(country);
-            return added
-                ? (true, string.Empty)
-                : (false, $"Country '{code}' is already blocked.");
+            if (!added)
+                return Task.FromResult((false, $"Country '{code}' is already blocked."));
+
+            _logger.LogInformation("Country {Code} permanently blocked.", code);
+            return Task.FromResult((true, string.Empty));
         }
 
         public (bool Success, string Error) UnblockCountry(string countryCode)
@@ -89,6 +49,7 @@ namespace CountryBlockerAPI.Services
                 return (false, $"Country '{code}' is not in the blocked list.");
 
             _repo.RemoveBlockedCountry(code);
+            _logger.LogInformation("Country {Code} unblocked.", code);
             return (true, string.Empty);
         }
 
@@ -124,17 +85,16 @@ namespace CountryBlockerAPI.Services
             };
         }
 
-
-        public async Task<(bool Success, string Error, int StatusCode)> AddTemporalBlockAsync(
+        public Task<(bool Success, string Error, int StatusCode)> AddTemporalBlockAsync(
             string countryCode, int durationMinutes)
         {
             var code = countryCode.ToUpperInvariant();
 
-            if (!ValidCountryCodes.Contains(code))
-                return (false, $"'{code}' is not a valid ISO 3166-1 alpha-2 country code.", 400);
+            if (!Constants.ValidCountryCodes.Contains(code))
+                return Task.FromResult((false, $"'{code}' is not a valid ISO 3166-1 alpha-2 country code.", 400));
 
             if (_repo.ExistsTemporalBlock(code))
-                return (false, $"Country '{code}' is already temporarily blocked.", 409);
+                return Task.FromResult((false, $"Country '{code}' is already temporarily blocked.", 409));
 
             var block = new TemporalBlock
             {
@@ -145,19 +105,56 @@ namespace CountryBlockerAPI.Services
                 DurationMinutes = durationMinutes
             };
 
+            var blockedAtemps = new BlockAttemptLog
+            {
+                CountryCode = code,
+                CountryName = GetCountryName(code),
+                IsBlocked = true
+            };
+
             var added = _repo.AddTemporalBlock(block);
             if (!added)
-                return (false, $"Country '{code}' is already temporarily blocked.", 409);
+                return Task.FromResult((false, $"Country '{code}' is already temporarily blocked.", 409));
 
             _logger.LogInformation(
                 "Temporal block added for {Code} – expires at {Expiry}", code, block.ExpiresAt);
 
-            return (true, string.Empty, 200);
+            _repo.AddLog(blockedAtemps);
+
+            return Task.FromResult((true, string.Empty, 200));
         }
 
+        public TemporalBlockResponseDto? GetTemporalBlockInfo(string countryCode)
+        {
+            var block = _repo.GetTemporalBlock(countryCode.ToUpperInvariant());
+            if (block is null || block.ExpiresAt <= DateTime.UtcNow) return null;
+
+            return new TemporalBlockResponseDto
+            {
+                CountryCode = block.CountryCode,
+                CountryName = block.CountryName,
+                ExpiresAt = block.ExpiresAt,
+                DurationMinutes = block.DurationMinutes,
+                MinutesRemaining = (int)(block.ExpiresAt - DateTime.UtcNow).TotalMinutes
+            };
+        }
+
+        public IEnumerable<TemporalBlockResponseDto> GetAllActiveTemporalBlocks()
+        {
+            return _repo.GetAllTemporalBlocks()
+                .Where(b => b.ExpiresAt > DateTime.UtcNow)
+                .Select(b => new TemporalBlockResponseDto
+                {
+                    CountryCode = b.CountryCode,
+                    CountryName = b.CountryName,
+                    ExpiresAt = b.ExpiresAt,
+                    DurationMinutes = b.DurationMinutes,
+                    MinutesRemaining = (int)(b.ExpiresAt - DateTime.UtcNow).TotalMinutes
+                });
+        }
 
         public static bool IsValidCountryCode(string code) =>
-            ValidCountryCodes.Contains(code?.ToUpperInvariant() ?? "");
+            Constants.ValidCountryCodes.Contains(code?.ToUpperInvariant() ?? "");
 
         private static string GetCountryName(string code) => code.ToUpperInvariant() switch
         {
@@ -181,6 +178,33 @@ namespace CountryBlockerAPI.Services
             "TR" => "Turkey",
             "NG" => "Nigeria",
             "ZA" => "South Africa",
+            "IT" => "Italy",
+            "ES" => "Spain",
+            "KR" => "South Korea",
+            "MX" => "Mexico",
+            "ID" => "Indonesia",
+            "PH" => "Philippines",
+            "VN" => "Vietnam",
+            "TH" => "Thailand",
+            "SE" => "Sweden",
+            "NO" => "Norway",
+            "DK" => "Denmark",
+            "FI" => "Finland",
+            "PL" => "Poland",
+            "NL" => "Netherlands",
+            "BE" => "Belgium",
+            "CH" => "Switzerland",
+            "AT" => "Austria",
+            "PT" => "Portugal",
+            "GR" => "Greece",
+            "SY" => "Syria",
+            "IQ" => "Iraq",
+            "LY" => "Libya",
+            "SD" => "Sudan",
+            "YE" => "Yemen",
+            "KP" => "North Korea",
+            "CU" => "Cuba",
+            "VE" => "Venezuela",
             _ => code
         };
     }
